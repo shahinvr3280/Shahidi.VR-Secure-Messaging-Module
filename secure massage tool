@@ -1,0 +1,47 @@
+
+
+class VoiceCallService: NSObject {
+    private var factory: RTCPeerConnectionFactory!
+    private var peerConnection: RTCPeerConnection!
+    private var audioTrack: RTCAudioTrack!
+
+    func setupPeerConnection(signalingClient: SignalingClient) {
+        let encoderFactory = RTCDefaultVideoEncoderFactory()
+        let decoderFactory = RTCDefaultVideoDecoderFactory()
+        factory = RTCPeerConnectionFactory(encoderFactory: encoderFactory, decoderFactory: decoderFactory)
+
+        let config = RTCConfiguration()
+        config.iceServers = [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])]
+        config.sdpSemantics = .unifiedPlan
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
+        peerConnection = factory.peerConnection(with: config, constraints: constraints, delegate: nil)
+
+        let audioSource = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
+        audioTrack = factory.audioTrack(with: audioSource, trackId: "ARDAMSa0")
+        let stream = factory.mediaStream(withStreamId: "ARDAMS")
+        stream.addAudioTrack(audioTrack)
+        peerConnection.add(stream)
+
+        signalingClient.onOffer = { [unowned self] sdp in
+            self.peerConnection.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp)) { _ in
+                self.peerConnection.answer(for: constraints) { answer, _ in
+                    self.peerConnection.setLocalDescription(answer!, completionHandler: nil)
+                    signalingClient.sendAnswer(answer!.sdp)
+                }
+            }
+        }
+        signalingClient.onIceCandidate = { cand in
+            self.peerConnection.add(RTCIceCandidate(sdp: cand.sdp, sdpMLineIndex: Int32(cand.sdpMLineIndex), sdpMid: cand.sdpMid))
+        }
+    }
+
+    func startCall(isCaller: Bool, signalingClient: SignalingClient) {
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
+        if isCaller {
+            peerConnection.offer(for: constraints) { offer, _ in
+                self.peerConnection.setLocalDescription(offer!, completionHandler: nil)
+                signalingClient.sendOffer(offer!.sdp)
+            }
+        }
+    }
+}
